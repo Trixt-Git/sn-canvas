@@ -7,7 +7,7 @@ import React from 'react';
 import {Image, Text} from 'react-native';
 import ReactTestRenderer, {act} from 'react-test-renderer';
 import {INITIAL_UI_STATE, type CanvasUiState} from '../src/domain/styles';
-import ZoomControl from '../src/ui/ZoomControl';
+import ZoomControl, {PERF_TEST_HOLD_MS} from '../src/ui/ZoomControl';
 
 const renderControl = (overrides: Partial<CanvasUiState> = {}) => {
   const onCommand = jest.fn();
@@ -137,4 +137,22 @@ test('the pill says whether the panel is open, the way the style toggle does', (
   control.press('canvas-zoom');
   expect(control.isExpanded()).toBe(true);
   expect(control.shown()).toBe('Hide zoom levels, 250%');
+});
+
+test('a long hold on the pill asks for the speed test map, and only a hold far longer than a tap', () => {
+  let renderer!: ReactTestRenderer.ReactTestRenderer;
+  const onCommand = jest.fn();
+  act(() => {
+    renderer = ReactTestRenderer.create(<ZoomControl ui={INITIAL_UI_STATE} onCommand={onCommand} onOpen={jest.fn()} />);
+  });
+  const pill = renderer.root.findByProps({testID: 'canvas-zoom'});
+  expect(pill.props.delayLongPress).toBe(PERF_TEST_HOLD_MS);
+  expect(PERF_TEST_HOLD_MS).toBeGreaterThanOrEqual(1000);
+
+  act(() => {
+    pill.props.onLongPress();
+  });
+  expect(onCommand).toHaveBeenCalledWith('loadPerfTest');
+  // The panel stays shut: the hold is not a tap.
+  expect(renderer.root.findAllByProps({testID: 'canvas-zoom-fit'})).toHaveLength(0);
 });

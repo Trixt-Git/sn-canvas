@@ -887,7 +887,10 @@ main() {
         if build_android_apk "$project_root" "$gen_cfg"; then
             copy_apk_and_update_config "$project_root" "$gen_dir" "$gen_cfg" || true
         else
+            # Stop here: carrying on would package a plugin with no native canvas in it, and CI
+            # and the Release workflow would publish it as if nothing had gone wrong.
             write_color_output "APK build failed" "Red"
+            exit 1
         fi
     else
         write_color_output "Build conditions not met; skipping native build and reactPackages update" "Yellow"

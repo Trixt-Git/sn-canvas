@@ -19,6 +19,9 @@ const BOTTOM = 92;
 const WIDTH = 78;
 const HEIGHT = 36;
 
+// How long the pill has to be held to load the speed test map: long enough that no tap gets there.
+export const PERF_TEST_HOLD_MS = 1500;
+
 export const ZOOM_GEOMETRY = {left: LEFT, bottom: BOTTOM, width: WIDTH, height: HEIGHT, centerX: LEFT + WIDTH / 2};
 
 /** [percent] is the zoom the row goes to, for marking the one you are already on; Fit has none. */
@@ -75,7 +78,11 @@ export default function ZoomControl({ui, onCommand, onOpen}: Props): React.JSX.E
         accessibilityLabel={isOpen ? `Hide zoom levels, ${ui.zoomPercent}%` : `Zoom, ${ui.zoomPercent}%`}
         accessibilityState={{expanded: isOpen}}
         style={styles.button}
-        onPress={toggle}>
+        onPress={toggle}
+        // Hidden speed-test tool: a long hold fills an empty canvas with the test map. The native side
+        // refuses on a canvas with anything on it, so no real work can be buried by an accidental hold.
+        delayLongPress={PERF_TEST_HOLD_MS}
+        onLongPress={() => run('loadPerfTest')}>
         <Text style={styles.buttonText}>{ui.zoomPercent}%</Text>
         {/* The same chevron the style button uses: without it the pill reads as a readout, not a control. */}
         <Image source={isOpen ? CHEVRON_UP : CHEVRON_DOWN} style={styles.chevron} />

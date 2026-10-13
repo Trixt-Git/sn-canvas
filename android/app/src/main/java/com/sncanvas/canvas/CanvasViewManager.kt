@@ -178,6 +178,7 @@ class CanvasViewManager(
                 "unlinkSelected" to { view -> view.controller.unlinkSelected() },
                 "group" to { view -> view.groupSelected() },
                 "ungroup" to { view -> view.ungroupSelected() },
+                "loadPerfTest" to { view -> view.loadPerfTest() },
             )
 
         // Command names and the numeric ids the Int overload receives (delete/undo/redo keep 1-3).

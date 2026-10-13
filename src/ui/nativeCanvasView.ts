@@ -44,7 +44,9 @@ export type CanvasCommand =
   | 'group'
   | 'ungroup'
   | 'linkSelected'
-  | 'unlinkSelected';
+  | 'unlinkSelected'
+  // Fills an empty canvas with the speed test map (PerfTestCanvas.kt); a canvas with anything on it is left alone.
+  | 'loadPerfTest';
 
 type NativeProps = ViewProps & {
   toolMode: ToolMode;

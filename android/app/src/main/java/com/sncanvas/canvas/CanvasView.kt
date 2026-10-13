@@ -8,6 +8,7 @@ import android.util.Log
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
+import java.io.File
 import kotlin.math.hypot
 
 /**
@@ -148,6 +149,9 @@ class CanvasView(
     // When the minimap shows, where it sits, and what it draws (Minimap).
     private val minimap = Minimap(this) { controller.state }
 
+    // How long each frame takes to draw, written beside the canvas file (PerfLog).
+    private val perfLog = PerfLog({ heldPath?.let { File(it).parentFile } })
+
     private val scaleGestureDetector =
         ScaleGestureDetector(
             context,
@@ -199,6 +203,7 @@ class CanvasView(
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        perfLog.flush()
         minimap.forget()
         liveInk.release()
         registry.detach(this)
@@ -241,6 +246,7 @@ class CanvasView(
     /** Replaces the canvas content, restarts the undo history from it, and frames it (FR13). */
     private fun setElements(elements: List<Element>) {
         controller.load(elements)
+        perfLog.mark("load", elements.size)
         // Said again even when it reads the same as the last canvas, so the screen always hears what a load left it with.
         controller.republish()
         events.onLoaded(this, elements.isNotEmpty())
@@ -259,6 +265,20 @@ class CanvasView(
 
     /** Frames all content in the view. */
     fun zoomToFit() = fitToContent()
+
+    /**
+     * Fills an empty canvas with the speed test map ([PerfTestCanvas]), as one undoable step, and frames it. A canvas
+     * with anything on it is left alone, so a stray long press can never bury real work under the test map.
+     */
+    fun loadPerfTest() {
+        if (controller.state.elements.isNotEmpty()) {
+            Log.i(LOG_TAG, "speed test map not loaded: the canvas is not empty")
+            return
+        }
+        controller.commit(PerfTestCanvas.elements())
+        perfLog.mark("perf-test", controller.state.elements.size)
+        fitToContent()
+    }
 
     /** Zooms to [percent] of actual size about the view's center, for the zoom control's presets (#12). */
     fun zoomToPercent(percent: Int) {
@@ -483,12 +503,23 @@ class CanvasView(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        val started = System.nanoTime()
+        val kind = drawFrame(canvas)
+        perfLog.frame(kind, gesture?.javaClass?.simpleName, controller.state.elements.size, started, System.nanoTime())
+    }
+
+    /**
+     * Draws one frame and says which kind it was, for [perfLog]: "ink" (the pencil's live stroke, drawn by the canvas
+     * when the firmware cannot ink it), "pan" (the snapshot taken as a pan began, slid under the finger) or "full"
+     * (everything, element by element).
+     */
+    private fun drawFrame(canvas: Canvas): String {
         val transform = controller.state.transform
         val freehand = gesture as? CanvasGesture.Freehand
-        if (freehand != null && liveInk.drawLive(canvas, frame.liveStroke(freehand), transform)) return
+        if (freehand != null && liveInk.drawLive(canvas, frame.liveStroke(freehand), transform)) return FRAME_INK
         if (gesture == CanvasGesture.Pan && panPreview.drawUnder(canvas, transform)) {
             minimap.draw(canvas, draggingMinimap())
-            return
+            return FRAME_PAN
         }
         renderer.drawBackground(canvas, width.toFloat(), height.toFloat())
         val elements = frame.elements(gesture, toWorld(dragCurrent.x, dragCurrent.y))
@@ -499,9 +530,14 @@ class CanvasView(
         if (gesture == CanvasGesture.DrawShape) renderer.drawDragPreview(canvas, toolMode, downTouch, dragCurrent, transform.zoom)
         if (gesture == CanvasGesture.Marquee) renderer.drawMarquee(canvas, downTouch, dragCurrent)
         minimap.draw(canvas, draggingMinimap())
+        return FRAME_FULL
     }
 
     private companion object {
+        const val FRAME_INK = "ink"
+        const val FRAME_PAN = "pan"
+        const val FRAME_FULL = "full"
+
         // Generous, so fitted content clears the floating toolbar at the bottom.
         const val FIT_PADDING_PX = 96.0
 
