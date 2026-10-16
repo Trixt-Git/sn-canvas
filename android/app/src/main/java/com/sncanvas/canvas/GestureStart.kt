@@ -58,15 +58,21 @@ internal class GestureStart(
             return startMinimapDrag(onMinimap, contact)
         }
         linkGlyphAt(world)?.let { linked -> return CanvasGesture.FollowLink(linked.id) }
-        return branchBadgeAt(world)?.let { node -> CanvasGesture.ToggleBranch(node.id) }
+        return branchBadgeAt(world, contact)?.let { node -> CanvasGesture.ToggleBranch(node.id) }
     }
 
     /**
      * The node whose branch badge is under [world] (mind maps), with a tool that works on nodes in hand:
-     * select, rectangle or ellipse. Never the pencil or the eraser, so a badge never swallows a stroke.
+     * select, rectangle or ellipse. Never the pencil or the eraser, so a badge never swallows a stroke, and
+     * never the pen's eraser end. With a shape tool only the pen counts, as it does for drawing, so a palm
+     * resting on a badge folds nothing away.
      */
-    private fun branchBadgeAt(world: Point): Element? {
-        if (host.toolMode() !in BADGE_TOOLS) return null
+    private fun branchBadgeAt(
+        world: Point,
+        contact: Contact,
+    ): Element? {
+        val tool = host.toolMode()
+        if (tool !in BADGE_TOOLS || contact.isEraser || (!contact.isPen && tool != CanvasTools.SELECT)) return null
         val shown = state()
         return MindMap.branchBadgeAt(world, shown.elements, host.selectedIds(), shown.zoom, LINK_GLYPH_HIT_PX / shown.zoom)
     }

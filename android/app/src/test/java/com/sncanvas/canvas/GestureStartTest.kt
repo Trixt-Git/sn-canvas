@@ -146,4 +146,21 @@ class GestureStartTest {
             visible = visible,
             fit = ViewTransform(0.0, 0.0, 1.0),
         )
+
+    // Wil's fork: a tap on a collapsed node's badge folds or unfolds its branch, but a palm or the eraser end never does.
+    @Test
+    fun `a collapsed node's badge answers the pen and the select tool, never a palm with a shape tool`() {
+        val centre = MindMap.newNode("c", CanvasTools.ELLIPSE, Point(0.0, 0.0), ShapeStyle.DEFAULT)
+        val child = MindMap.newNode("k", CanvasTools.ELLIPSE, Point(600.0, 0.0), ShapeStyle.DEFAULT)
+        controller.load(MindMap.collapse("c", listOf(MindMap.arrowBetween("ck", centre, child, ShapeStyle.DEFAULT), centre, child)))
+        val badge = MindMap.branchBadgePoint(controller.state.elements.single(), controller.state.zoom)
+        val at = { contact: Contact -> starts.at(contact, badge) }
+        assertEquals(CanvasGesture.ToggleBranch("c"), at(finger))
+        host.tool = CanvasTools.ELLIPSE
+        assertEquals(CanvasGesture.ToggleBranch("c"), at(pen))
+        assertNull(at(finger))
+        assertTrue(at(eraser) is CanvasGesture.Erase)
+        host.tool = CanvasTools.DRAW
+        assertTrue(at(pen) is CanvasGesture.Freehand)
+    }
 }
