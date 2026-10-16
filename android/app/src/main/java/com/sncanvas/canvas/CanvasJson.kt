@@ -84,6 +84,12 @@ object CanvasJson {
                     number("page", link.page.toDouble())
                 }
             }
+            element.attachedTo?.let { string("attachedTo", it) }
+            element.collapsed?.let { hidden -> raw("collapsed", hidden.joinToString(",", "[", "]") { serializeElement(it) }) }
+            element.collapsedCenter?.let { center ->
+                number("collapsedX", center.x)
+                number("collapsedY", center.y)
+            }
         }
         return sb.append('}').toString()
     }
@@ -108,7 +114,13 @@ object CanvasJson {
             }
         val obj = root as? JsonValue.Obj ?: return emptyList()
         val elementsArray = obj.entries["elements"] as? JsonValue.Arr ?: return emptyList()
-        return elementsArray.items.mapNotNull { item ->
+        return elementsFromJson(elementsArray)
+    }
+
+    /** Every element in [array] that reads; one that does not is skipped, as [deserializeElements] says. */
+    @Suppress("SwallowedException") // see deserializeElements
+    private fun elementsFromJson(array: JsonValue.Arr): List<Element> =
+        array.items.mapNotNull { item ->
             val itemObj = item as? JsonValue.Obj ?: return@mapNotNull null
             try {
                 elementFromJson(itemObj)
@@ -118,7 +130,6 @@ object CanvasJson {
                 null
             }
         }
-    }
 
     private fun elementFromJson(obj: JsonValue.Obj): Element =
         Element(
@@ -151,6 +162,11 @@ object CanvasJson {
                 (obj.entries["image"] as? JsonValue.Obj)?.let {
                     ImageData(it.string("file").orEmpty(), it.number("width")?.toInt() ?: 0, it.number("height")?.toInt() ?: 0)
                 },
+            // Mind maps: absent in canvases saved before they existed, which load with nothing attached or collapsed.
+            attachedTo = obj.string("attachedTo"),
+            collapsed = (obj.entries["collapsed"] as? JsonValue.Arr)?.let(::elementsFromJson),
+            collapsedCenter =
+                obj.number("collapsedX")?.let { x -> obj.number("collapsedY")?.let { y -> Point(x, y) } },
         )
 
     /** Where an element links to, or null when it links nowhere, names a kind this build does not know, or has no target. */

@@ -51,6 +51,10 @@ class CanvasController(
     var currentStyle = ShapeStyle.DEFAULT
         private set
 
+    /** How wide the pencil writes (PLAN.md step 3). */
+    var penWeight = PenWeight.FINE
+        private set
+
     private val history = EditHistory()
     private var lastUiState: CanvasUiState? = null
 
@@ -164,12 +168,76 @@ class CanvasController(
         commit(CanvasCore.moveElements(state, selectedIds, dx, dy).elements)
     }
 
-    /** A finished gesture's result, as one undoable step. */
+    /**
+     * A finished gesture's result, as one undoable step. Writing attached to a node goes wherever the
+     * edit took that node, and away with it if it went ([MindMap.follow]): every edit, whatever made it.
+     */
     fun commit(elements: List<Element>) {
-        state = state.copy(elements = elements)
-        history.commit(elements)
+        val kept = MindMap.follow(state.elements, elements)
+        state = state.copy(elements = kept)
+        history.commit(kept)
         changed()
     }
+
+    /** The pencil writes at [weight] from now on; the toolbar hears so. */
+    fun setPenWeight(weight: PenWeight) {
+        if (weight == penWeight) return
+        penWeight = weight
+        publish()
+    }
+
+    /**
+     * A tap with the rectangle or ellipse tool (mind maps). On a node, it selects that node, or lets it
+     * go when it was the one selected already. Anywhere else it places a new node centred there, in the
+     * current style and sized by it, joined by an arrow from the node selected if there is one, and
+     * selects the new node: so tap after tap builds a branch, and tapping the selected node lets it go
+     * to start somewhere else. One undoable step.
+     */
+    fun tapNode(
+        tool: String,
+        at: Point,
+    ) {
+        val hit = MindMap.nodeAt(at, state.elements)
+        if (hit != null) {
+            select(if (selectedIds == setOf(hit.id)) null else hit.id)
+            return
+        }
+        val parent = selected?.takeIf(MindMap::isNode)
+        val node = MindMap.newNode(newId(), tool, at, currentStyle)
+        val arrow = parent?.let { MindMap.arrowBetween(newId(), it, node, currentStyle) }
+        tappedCell = null
+        selectedIds = setOf(node.id)
+        commit(state.elements + listOfNotNull(arrow) + node)
+    }
+
+    /** Folds node [id]'s branch away, or brings a folded one back (mind maps); one undoable step. */
+    fun toggleCollapsed(id: String) {
+        val node = state.elements.find { it.id == id } ?: return
+        val next = if (MindMap.canExpand(node)) MindMap.expand(id, state.elements) else MindMap.collapse(id, state.elements)
+        if (next === state.elements) return
+        val present = next.map { it.id }.toSet()
+        selectedIds = selectedIds.filterTo(mutableSetOf()) { it in present }
+        commit(next)
+    }
+
+    fun collapseSelected() {
+        selected?.takeIf { MindMap.canCollapse(it, state.elements) }?.let { toggleCollapsed(it.id) }
+    }
+
+    fun expandSelected() {
+        selected?.takeIf(MindMap::canExpand)?.let { toggleCollapsed(it.id) }
+    }
+
+    /** Spaces the selected node's children evenly around it, each with its branch (mind maps); one undoable step. */
+    fun tidySelected() {
+        val node = selected?.takeIf(MindMap::isNode) ?: return
+        val next = MindMap.tidy(node.id, state.elements)
+        if (next == state.elements) return
+        commit(next)
+    }
+
+    /** The selected node and everything below it, for exporting a branch; null unless one node is selected. */
+    fun selectedBranch(): List<Element>? = selected?.takeIf(MindMap::isNode)?.let { MindMap.branch(it.id, state.elements) }
 
     /** [edited] after a resize of element [id], for its preview and its commit: a table's rows share its new height, text refits. */
     fun fitted(
@@ -268,10 +336,14 @@ class CanvasController(
     fun duplicateSelected(offset: Double) {
         if (selectedIds.isEmpty()) return
         val copies = mutableSetOf<String>()
+        // The writing in a node is copied with it (mind maps), attached to the copy.
+        val originals = selectedElements + MindMap.attachmentsOf(selectedIds, state.elements).filterNot { it.id in selectedIds }
+        val copyOf = mutableMapOf<String, String>()
         val duplicated =
-            selectedElements.fold(state) { copied, element ->
+            originals.fold(state) { copied, element ->
                 val copyId = newId()
                 copies += copyId
+                copyOf[element.id] = copyId
                 CanvasActions.duplicate(copied, element.id, copyId, offset)
             }
         // Copies of a group form a group of their own, or they would join the one they were copied from.
@@ -279,13 +351,19 @@ class CanvasController(
         val regrouped =
             duplicated.elements.map { element ->
                 val group = element.groupId
-                if (element.id !in copies || group == null) {
-                    element
-                } else {
-                    element.copy(groupId = groupsForCopies.getOrPut(group) { newId() })
+                when {
+                    element.id !in copies -> element
+                    // A copy of a collapsed node is copied as it shows: its folded branch stays with the original.
+                    else ->
+                        element.copy(
+                            groupId = group?.let { groupsForCopies.getOrPut(it) { newId() } },
+                            attachedTo = element.attachedTo?.let { copyOf[it] ?: it },
+                            collapsed = null,
+                            collapsedCenter = null,
+                        )
                 }
             }
-        selectedIds = copies
+        selectedIds = selectedIds.mapNotNullTo(mutableSetOf()) { copyOf[it] }
         commit(regrouped)
     }
 
@@ -409,6 +487,11 @@ class CanvasController(
                 canRemoveTableRow = (tappedTable?.rows ?: 1) > 1,
                 canRemoveTableColumn = (tappedTable?.cols ?: 1) > 1,
                 zoomPercent = Math.round(state.zoom * 100).toInt(),
+                penWeight = penWeight.id,
+                nodeSelected = element?.let(MindMap::isNode) == true,
+                canCollapse = element?.let { MindMap.canCollapse(it, state.elements) } == true,
+                canExpand = element?.let(MindMap::canExpand) == true,
+                canTidy = element?.let { MindMap.isNode(it) && MindMap.childrenOf(it.id, state.elements).isNotEmpty() } == true,
             )
         if (uiState == lastUiState) return
         lastUiState = uiState

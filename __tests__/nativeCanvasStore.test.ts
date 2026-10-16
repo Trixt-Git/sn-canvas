@@ -21,6 +21,7 @@ const createNative = (): jest.Mocked<NativeCanvasModule> => ({
   setNotePen: jest.fn().mockResolvedValue(true),
   importImage: jest.fn().mockResolvedValue(true),
   exportPdf: jest.fn().mockResolvedValue(true),
+  exportBranchPdf: jest.fn().mockResolvedValue(true),
 });
 
 test('a PDF export reaches the native view with its path, and only a native true is true', async () => {
@@ -30,6 +31,17 @@ test('a PDF export reaches the native view with its path, and only a native true
   expect(native.exportPdf).toHaveBeenCalledWith('/e/Canvas.pdf');
   native.exportPdf.mockResolvedValueOnce(false);
   expect(await store.exportPdf('/e/Canvas.pdf')).toBe(false);
+});
+
+// Wil's fork: a branch export reaches its own native method, and the whole-canvas one is left alone.
+test('a branch export reaches the native view by its own method', async () => {
+  const native = createNative();
+  const store = createNativeCanvasStore(createRecordingLogger(), native);
+  expect(await store.exportPdf('/e/Branch.pdf', true)).toBe(true);
+  expect(native.exportBranchPdf).toHaveBeenCalledWith('/e/Branch.pdf');
+  expect(native.exportPdf).not.toHaveBeenCalled();
+  native.exportBranchPdf.mockResolvedValueOnce(false);
+  expect(await store.exportPdf('/e/Branch.pdf', true)).toBe(false);
 });
 
 test('a picked image reaches the native view with the folder to copy it into, and only a native true is true', async () => {

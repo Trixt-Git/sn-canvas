@@ -103,6 +103,14 @@ internal class CanvasRenderer(
 
     private val linkGlyphPath = Path()
 
+    private val badgeTextPaint =
+        TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = BADGE_TEXT_PX
+            color = Color.WHITE
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.DEFAULT_BOLD
+        }
+
     private val linkGlyphPaint =
         Paint().apply {
             style = Paint.Style.FILL
@@ -126,16 +134,64 @@ internal class CanvasRenderer(
         canvas.drawRect(0f, 0f, width, height, backgroundPaint)
     }
 
-    /** Draws [elements] in z-order, each in its own style through [palette], leaving out the text being [editing]. */
+    /**
+     * Draws [elements] in z-order, each in its own style through [palette], leaving out the text being [editing].
+     * Elements in [skip] are left out, and with [only] just those are drawn ([SceneCache] draws everything a gesture
+     * is not changing, and the frame draws what it is changing on top). With a [visible] world rect, what lies wholly
+     * outside it is not drawn at all ([SceneCull]). Connectors always find the shapes they are bound to in [elements].
+     */
     fun drawElements(
         canvas: Canvas,
         elements: List<Element>,
         transform: ViewTransform,
         palette: StylePalette,
         editing: ElementPainter.HiddenText? = null,
+        skip: Set<String> = emptySet(),
+        only: Set<String>? = null,
+        visible: WorldRect? = null,
     ) {
         val context = ElementPainter.Context(transform, palette, editing)
-        for (element in elements) painter.draw(canvas, element, elements, context)
+        val margin = SceneCull.MARGIN_PX / transform.zoom
+        for (element in elements) {
+            if (element.id in skip || (only != null && element.id !in only)) continue
+            if (visible != null && !SceneCull.isVisible(element, elements, visible, margin)) continue
+            painter.draw(canvas, element, elements, context)
+        }
+    }
+
+    /**
+     * The badge beside a node with a branch (mind maps): "+3" on a collapsed node, saying how many nodes it
+     * is hiding, and "−" beside the node selected on its own, to fold its branch away. A tap on either toggles
+     * it. Drawn at a fixed size whatever the zoom, like the link glyph.
+     */
+    fun drawBranchBadges(
+        canvas: Canvas,
+        elements: List<Element>,
+        selectedIds: Set<String>,
+        transform: ViewTransform,
+    ) {
+        for (node in elements) {
+            if (!MindMap.isNode(node) || !MindMap.showsBadge(node, elements, selectedIds)) continue
+            val at = screenPoint(MindMap.branchBadgePoint(node, transform.zoom), transform)
+            val label = if (MindMap.canExpand(node)) "+${MindMap.hiddenCount(node)}" else "\u2212"
+            val radius = maxOf(BADGE_RADIUS_PX, badgeTextPaint.measureText(label) / 2 + BADGE_PADDING_PX)
+            canvas.drawCircle(at.x, at.y, radius, handlePaint)
+            canvas.drawText(label, at.x, at.y - (badgeTextPaint.ascent() + badgeTextPaint.descent()) / 2, badgeTextPaint)
+        }
+    }
+
+    /** A word in a black pill at the top of the view, such as "Eraser" while the gesture eraser is on. */
+    fun drawModeLabel(
+        canvas: Canvas,
+        label: String,
+        width: Float,
+    ) {
+        val textWidth = badgeTextPaint.measureText(label)
+        val halfWidth = textWidth / 2 + MODE_LABEL_PADDING_PX
+        val top = MODE_LABEL_TOP_PX
+        val height = BADGE_TEXT_PX + 2 * BADGE_PADDING_PX
+        canvas.drawRoundRect(width / 2 - halfWidth, top, width / 2 + halfWidth, top + height, height / 2, height / 2, handlePaint)
+        canvas.drawText(label, width / 2, top + height / 2 - (badgeTextPaint.ascent() + badgeTextPaint.descent()) / 2, badgeTextPaint)
     }
 
     /**
@@ -381,7 +437,7 @@ internal class CanvasRenderer(
             reuse?.takeIf { it.width == width && it.height == height } ?: Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         drawBackground(canvas, width.toFloat(), height.toFloat())
-        drawElements(canvas, elements, transform, StylePalette.EINK)
+        drawElements(canvas, elements, transform, StylePalette.EINK, visible = transform.visibleRect(width.toDouble(), height.toDouble()))
         return bitmap
     }
 
@@ -473,6 +529,13 @@ internal class CanvasRenderer(
 
         // How far each corner bracket reaches along the current cell's edges (#53).
         const val CELL_BRACKET_PX = 20f
+
+        // The branch badge (mind maps) and the mode label share a size with the link glyph.
+        const val BADGE_RADIUS_PX = 26f
+        const val BADGE_TEXT_PX = 26f
+        const val BADGE_PADDING_PX = 10f
+        const val MODE_LABEL_PADDING_PX = 22f
+        const val MODE_LABEL_TOP_PX = 16f
 
         const val HANDLE_DRAW_SIZE_PX = 24f
         const val ROTATE_HANDLE_RADIUS_PX = 22f

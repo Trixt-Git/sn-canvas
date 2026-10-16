@@ -35,8 +35,11 @@ export type CanvasStorePort = {
   load: (path: string, imageDir: string) => Promise<boolean>;
   /** Copies the image at [source] into [imageDir] and puts it on the canvas shown (FR22); false when it can't. */
   importImage: (source: string, imageDir: string) => Promise<boolean>;
-  /** Writes the canvas shown to a one-page PDF at [path], fitted to its content (FR11); false when it can't. */
-  exportPdf: (path: string) => Promise<boolean>;
+  /**
+   * Writes the canvas shown to a one-page PDF at [path], fitted to its content (FR11); with [branchOnly], just the
+   * selected mind-map node and everything below it (Wil's fork). False when it can't, or with no node selected.
+   */
+  exportPdf: (path: string, branchOnly?: boolean) => Promise<boolean>;
   /**
    * Writes the canvas shown to [path], the file it was loaded from. Any other
    * file is refused (false), never written: a canvas file only ever holds the

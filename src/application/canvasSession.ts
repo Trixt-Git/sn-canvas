@@ -127,8 +127,11 @@ export type CanvasSession = {
    * while one runs are ignored.
    */
   saveToNote: () => Promise<SaveToNoteResult>;
-  /** Exports the canvas shown to a PDF in EXPORT, fitted to its content (FR11); its path, or null when none was written. */
-  exportPdf: () => Promise<string | null>;
+  /**
+   * Exports the canvas shown to a PDF in EXPORT, fitted to its content (FR11), or with [branchOnly] just the selected
+   * mind-map branch; its path, or null when none was written.
+   */
+  exportPdf: (branchOnly?: boolean) => Promise<string | null>;
   /** Saves the canvas, then closes the plugin view whether or not the save worked. */
   close: () => Promise<void>;
   currentCanvasId: () => string;
@@ -489,7 +492,7 @@ export function createCanvasSession({
     return inserted;
   };
 
-  const exportPdf = async (): Promise<string | null> => {
+  const exportPdf = async (branchOnly = false): Promise<string | null> => {
     let exported: string | null = null;
     await serially(async () => {
       // Writing a PDF writes a file and nothing else, so it asks only to write (#17).
@@ -498,7 +501,7 @@ export function createCanvasSession({
         return;
       }
       const path = pdfPath(now());
-      if (await store.exportPdf(path)) {
+      if (await store.exportPdf(path, branchOnly)) {
         exported = path;
         logger.log(`${TAG}[PDF] exported ${path}`);
       } else {

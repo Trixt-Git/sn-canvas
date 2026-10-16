@@ -67,6 +67,12 @@ test('parseUiState reads a well-formed event body', () => {
     hasLink: true,
     selectedType: 'table',
     style,
+    // Wil's fork: absent from this body, so the pencil writes fine and no node is selected.
+    penWeight: 'fine',
+    nodeSelected: false,
+    canCollapse: false,
+    canExpand: false,
+    canTidy: false,
   });
   expect(parseUiState({selectedType: ''}).selectedType).toBeNull();
 });
@@ -114,4 +120,12 @@ test('every fill the catalog lists comes back through parseUiState, gradient inc
   expect(FILLS.map(fill => parseUiState({style: {fill}}).style.fill)).toEqual([...FILLS]);
   // And one it has never heard of still falls back rather than coming through.
   expect(parseUiState({style: {fill: 'plaid'}}).style.fill).toBe(DEFAULT_STYLE.fill);
+});
+
+// Wil's fork: the pencil's weight and what a selected mind-map node allows.
+test('the pen weight and the node actions come through, and anything unknown falls back', () => {
+  const ui = parseUiState({penWeight: 'bold', nodeSelected: true, canCollapse: true, canExpand: false, canTidy: true});
+  expect([ui.penWeight, ui.nodeSelected, ui.canCollapse, ui.canExpand, ui.canTidy]).toEqual(['bold', true, true, false, true]);
+  expect(parseUiState({penWeight: 'huge'}).penWeight).toBe('fine');
+  expect(parseUiState({nodeSelected: 'yes'}).nodeSelected).toBe(false);
 });

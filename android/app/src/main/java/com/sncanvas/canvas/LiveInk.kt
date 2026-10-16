@@ -40,6 +40,14 @@ internal class LiveInk(
 
     private val firmwareInks: Boolean get() = claimed && pencil
 
+    /** The pencil's weight (FINE or BOLD): which pen the firmware inks with. */
+    var penWeight: PenWeight = PenWeight.FINE
+        set(value) {
+            if (field == value) return
+            field = value
+            firmware.usePen(value.firmwarePen)
+        }
+
     /** Whether the canvas must draw the live stroke itself. */
     val drawsLiveStroke: Boolean get() = !firmwareInks
 
@@ -56,7 +64,7 @@ internal class LiveInk(
     fun update(pencil: Boolean) {
         this.pencil = pencil
         if (!view.isAttachedToWindow || (!pencil && !claimed)) return
-        claimed = firmware.setup()
+        claimed = firmware.setup(penWeight.firmwarePen)
         firmware.setWritable(pencil)
         // Whatever the pen inked outside the canvas (a tap on the toolbar, say) goes too.
         clear()

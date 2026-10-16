@@ -16,17 +16,23 @@ internal class CanvasFrame(
         pointer: Point,
     ): List<Element> {
         val erasing = (gesture as? CanvasGesture.Erase)?.ids.orEmpty()
-        return (previewEdit(gesture, pointer)?.elements ?: controller.state.elements).map {
-            if (it.id in erasing) it.copy(style = it.style.copy(opacity = ERASE_PREVIEW_OPACITY)) else it
-        }
+        val held = controller.state.elements
+        // The writing in a node previews moving with it, as it will once the gesture commits (MindMap.follow).
+        val shown = previewEdit(gesture, pointer)?.elements?.let { MindMap.follow(held, it) } ?: held
+        if (erasing.isEmpty()) return shown
+        // What the eraser takes from a node takes the node's writing with it, so that fades too.
+        val fading = erasing + MindMap.attachmentsOf(erasing, held).map { it.id }
+        return shown.map { if (it.id in fading) it.copy(style = it.style.copy(opacity = ERASE_PREVIEW_OPACITY)) else it }
     }
 
     /** [CanvasController.editing] as the painter's own [ElementPainter.HiddenText], so it never needs the controller's type. */
     fun hiddenText(): ElementPainter.HiddenText? = controller.editing?.let { ElementPainter.HiddenText(it.elementId, it.cellIndex) }
 
-    /** The stroke the pencil is drawing, in the style new elements get. */
+    /** The stroke the pencil is drawing, in the style new elements get, at the pencil's weight. */
     fun liveStroke(freehand: CanvasGesture.Freehand): Element? =
-        StrokeElements.fromSamples(LIVE_STROKE_ID, freehand.samples, controller.state.zoom)?.copy(style = controller.currentStyle)
+        StrokeElements
+            .fromSamples(LIVE_STROKE_ID, freehand.samples, controller.state.zoom, controller.penWeight.widthPx)
+            ?.copy(style = controller.currentStyle)
 
     /** The canvas as [gesture] would leave it: a move takes the whole selection, every other edit one element. */
     private fun previewEdit(

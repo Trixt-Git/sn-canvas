@@ -38,6 +38,10 @@ export type CanvasStyle = {color: ColorId; opacity: number; fill: FillId; dash: 
 /** A style property, as the native `setStyle` command takes it. */
 export type StyleProperty = keyof CanvasStyle;
 
+/** The pencil's two weights (Wil's fork), by the ids PenWeight.kt uses. */
+export const PEN_WEIGHTS = ['fine', 'bold'] as const;
+export type PenWeightId = (typeof PEN_WEIGHTS)[number];
+
 /** tldraw's defaults, which the native canvas also starts with. */
 export const DEFAULT_STYLE: CanvasStyle = {color: 'black', opacity: 1, fill: 'none', dash: 'draw', size: 'm'};
 
@@ -62,6 +66,15 @@ export type CanvasUiState = {
   /** The selected element's type (such as 'table'), or null with nothing selected. */
   selectedType: string | null;
   style: CanvasStyle;
+  /** How wide the pencil writes, for the toolbar's Fine/Bold toggle. */
+  penWeight: PenWeightId;
+  /** Whether the one selected element is a mind-map node, so its branch can be exported. */
+  nodeSelected: boolean;
+  /** Whether the selected node's branch can be folded away, or one folded away brought back. */
+  canCollapse: boolean;
+  canExpand: boolean;
+  /** Whether the selected node has children to space out. */
+  canTidy: boolean;
 };
 
 export const INITIAL_UI_STATE: CanvasUiState = {
@@ -77,6 +90,11 @@ export const INITIAL_UI_STATE: CanvasUiState = {
   zoomPercent: 100,
   selectedType: null,
   style: DEFAULT_STYLE,
+  penWeight: 'fine',
+  nodeSelected: false,
+  canCollapse: false,
+  canExpand: false,
+  canTidy: false,
 };
 
 const COLOR_IDS: readonly ColorId[] = COLORS.map(color => color.id);
@@ -110,6 +128,11 @@ export function parseUiState(payload: unknown): CanvasUiState {
       dash: oneOf(IMAGE_DASHES, style.dash, DEFAULT_STYLE.dash),
       size: oneOf(SIZES, style.size, DEFAULT_STYLE.size),
     },
+    penWeight: oneOf(PEN_WEIGHTS, body.penWeight, 'fine'),
+    nodeSelected: body.nodeSelected === true,
+    canCollapse: body.canCollapse === true,
+    canExpand: body.canExpand === true,
+    canTidy: body.canTidy === true,
   };
 }
 

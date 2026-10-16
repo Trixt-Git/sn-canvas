@@ -210,6 +210,30 @@ class CanvasModule(
         }
     }
 
+    /**
+     * Exports the selected node's branch to a one-page PDF at [path] (mind maps, PLAN.md step 9): the node, every
+     * node below it, the connectors between them and the writing in them, fitted like [exportPdf]. Resolves false,
+     * writing nothing, when no node is selected.
+     */
+    @ReactMethod
+    fun exportBranchPdf(
+        path: String,
+        promise: Promise,
+    ) {
+        val view = registry.current() ?: return promise.reject(ERR_NO_ACTIVE_VIEW, "No active canvas view to export")
+        view.post {
+            val branch = view.controller.selectedBranch()
+            if (branch == null) {
+                promise.resolve(false)
+                return@post
+            }
+            inBackground(promise) {
+                PdfExport.write(branch, File(path), images)
+                true
+            }
+        }
+    }
+
     /** The text at [path], or null when there is no such file (the canvas link index, which the JS session reads). */
     @ReactMethod
     fun readText(

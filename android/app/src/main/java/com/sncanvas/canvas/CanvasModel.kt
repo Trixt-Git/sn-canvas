@@ -270,6 +270,15 @@ data class Element(
     val groupId: String? = null,
     // FR7: where this element links to, if anywhere; its glyph is what follows it.
     val link: ElementLink? = null,
+    // Mind maps: the node (rectangle/ellipse) a freehand stroke was written in, so it moves and is
+    // deleted with that node; null for writing of its own. See [MindMap.attachTo].
+    val attachedTo: String? = null,
+    // Mind maps: a collapsed node's hidden branch, taken out of the canvas and kept here until it is
+    // expanded; null for a node that is not collapsed. See [MindMap.collapse].
+    val collapsed: List<Element>? = null,
+    // Where a collapsed node's centre was when it was collapsed, so its branch comes back beside it
+    // even after the node has been moved.
+    val collapsedCenter: Point? = null,
 ) {
     init {
         require(rotation.isFinite()) { "rotation must be finite" }

@@ -37,6 +37,9 @@ internal class GestureStart(
             erase: CanvasGesture.Erase,
             world: Point,
         )
+
+        /** What is selected: the one node selected alone shows the badge that folds its branch away. */
+        fun selectedIds(): Set<String> = emptySet()
     }
 
     /** The gesture [contact], which landed on [world], starts; null when it starts nothing (a resting palm). */
@@ -54,7 +57,18 @@ internal class GestureStart(
         if (onMinimap != null && onMinimap.contains(contact.x.toDouble(), contact.y.toDouble())) {
             return startMinimapDrag(onMinimap, contact)
         }
-        return linkGlyphAt(world)?.let { linked -> CanvasGesture.FollowLink(linked.id) }
+        linkGlyphAt(world)?.let { linked -> return CanvasGesture.FollowLink(linked.id) }
+        return branchBadgeAt(world)?.let { node -> CanvasGesture.ToggleBranch(node.id) }
+    }
+
+    /**
+     * The node whose branch badge is under [world] (mind maps), with a tool that works on nodes in hand:
+     * select, rectangle or ellipse. Never the pencil or the eraser, so a badge never swallows a stroke.
+     */
+    private fun branchBadgeAt(world: Point): Element? {
+        if (host.toolMode() !in BADGE_TOOLS) return null
+        val shown = state()
+        return MindMap.branchBadgeAt(world, shown.elements, host.selectedIds(), shown.zoom, LINK_GLYPH_HIT_PX / shown.zoom)
     }
 
     /** What the tool in hand makes of a touch at [world]. */
@@ -144,5 +158,8 @@ internal class GestureStart(
 
         /** A link glyph's tap radius; a touch this close to it follows the link (FR7). */
         const val LINK_GLYPH_HIT_PX = 40.0
+
+        /** The tools a branch badge answers to (mind maps). */
+        private val BADGE_TOOLS = setOf(CanvasTools.SELECT, CanvasTools.RECTANGLE, CanvasTools.ELLIPSE)
     }
 }

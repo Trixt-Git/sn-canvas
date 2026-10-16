@@ -28,8 +28,8 @@ internal class FirmwareInk(
     // The firmware only takes clears and releases from the app that claimed the pen.
     private var claimed = false
 
-    /** Claims the pen for this window, inking everywhere with the canvas's pencil; safe to repeat. False without the firmware service. */
-    fun setup(): Boolean {
+    /** Claims the pen for this window, inking everywhere with [pen]; safe to repeat. False without the firmware service. */
+    fun setup(pen: FirmwarePen = FirmwarePen.CANVAS): Boolean {
         if (binder() == null) return false
         send(TX_WRITE_APP_INFO) { parcel ->
             parcel.writeInt(0)
@@ -38,9 +38,14 @@ internal class FirmwareInk(
         enableFullUiAuto(true)
         // No disabled areas.
         send(TX_DISABLE_AREA) { parcel -> parcel.writeInt(0) }
-        sendPen(FirmwarePen.CANVAS)
+        sendPen(pen)
         claimed = true
         return true
+    }
+
+    /** Inks with [pen] from now on: the pencil's weight changed while the pen is claimed. */
+    fun usePen(pen: FirmwarePen) {
+        if (claimed) sendPen(pen)
     }
 
     /** Wipes the firmware ink overlay. */

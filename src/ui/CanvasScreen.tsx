@@ -151,9 +151,10 @@ export default function CanvasScreen({createSession, buttonEvents, backBadgeTaps
     setToolMode(tool);
   };
 
-  // FR11: say where the PDF went, since nothing on the canvas shows it; or that it didn't.
-  const exportPdf = async () => {
-    const path = await session.exportPdf();
+  // FR11: say where the PDF went, since nothing on the canvas shows it; or that it didn't. A branch (Wil's fork)
+  // is the selected mind-map node and everything below it.
+  const exportPdf = async (branchOnly = false) => {
+    const path = await session.exportPdf(branchOnly);
     setNotice(path === null ? 'Could not export the PDF' : `Saved to ${path.replace(`${STORAGE_ROOT}/`, '')}`);
   };
 
@@ -250,7 +251,7 @@ export default function CanvasScreen({createSession, buttonEvents, backBadgeTaps
             testID="canvas-export-pdf"
             label="Export to PDF"
             icon={EXPORT_PDF_ICON}
-            onPress={exportPdf}
+            onPress={() => exportPdf()}
             disabled={!ui.hasContent}
           />
           <HeaderButton
@@ -287,6 +288,7 @@ export default function CanvasScreen({createSession, buttonEvents, backBadgeTaps
           onNoteCanvases={showNoteCanvases}
           onShowTour={() => setShowTour(true)}
           onMenuOpen={() => setShowHints(false)}
+          onExportBranch={() => exportPdf(true)}
         />
         <ZoomControl ui={ui} onCommand={command => runCommand(command)} onOpen={() => setShowHints(false)} />
         {/* Over the action bar, which is always there and sits across the middle tools: the eraser's hint has to
@@ -314,6 +316,8 @@ export default function CanvasScreen({createSession, buttonEvents, backBadgeTaps
           onToggleHints={() => setShowHints(current => !current)}
           onClearCanvas={() => setConfirmingClear(true)}
           canClearCanvas={ui.hasContent}
+          penWeight={ui.penWeight}
+          onPenWeightChange={weight => runCommand('setPenWeight', [weight])}
         />
         {/* Over everything, unlike the hints: the tour puts a scrim down and closes on a tap outside
             its card, so a toolbar or a style panel left on top of it would sit crisp over the faded

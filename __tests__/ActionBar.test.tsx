@@ -17,6 +17,7 @@ const renderBar = (overrides: Partial<CanvasUiState> = {}) => {
   const onNoteCanvases = jest.fn();
   const onMenuOpen = jest.fn();
   const onShowTour = jest.fn();
+  const onExportBranch = jest.fn();
   let renderer!: ReactTestRenderer.ReactTestRenderer;
   act(() => {
     renderer = ReactTestRenderer.create(
@@ -30,6 +31,7 @@ const renderBar = (overrides: Partial<CanvasUiState> = {}) => {
         onNoteCanvases={onNoteCanvases}
         onShowTour={onShowTour}
         onMenuOpen={onMenuOpen}
+        onExportBranch={onExportBranch}
       />,
     );
   });
@@ -40,7 +42,22 @@ const renderBar = (overrides: Partial<CanvasUiState> = {}) => {
   const isDisabled = (testID: string) => renderer.root.findByProps({testID}).props.disabled;
   const isListed = (testID: string) => renderer.root.findAllByProps({testID}).length > 0;
   const isMenuOpen = () => isListed('canvas-menu-zoomToFit');
-  return {onCommand, onNewCanvas, onClearCanvas, onLinkToNote, onLinkToCanvas, onNoteCanvases, onShowTour, onMenuOpen, press, isDisabled, isMenuOpen, isListed, renderer};
+  return {
+    onCommand,
+    onNewCanvas,
+    onClearCanvas,
+    onLinkToNote,
+    onLinkToCanvas,
+    onNoteCanvases,
+    onShowTour,
+    onMenuOpen,
+    onExportBranch,
+    press,
+    isDisabled,
+    isMenuOpen,
+    isListed,
+    renderer,
+  };
 };
 
 const ACTIONS = ['canvas-undo', 'canvas-redo', 'canvas-delete', 'canvas-duplicate'];
@@ -269,4 +286,21 @@ describe('the geometry it publishes', () => {
     // And the first is the same distance in from the left.
     expect(ACTION_BAR_GEOMETRY.buttonCenterX('canvas-undo')).toBe(-(width / 2 - bar.borderWidth - bar.paddingHorizontal - button.width / 2));
   });
+});
+
+// Wil's fork: a selected mind-map node brings its branch's items into the menu.
+test('the branch items are listed only with a node selected, each enabled when it applies', () => {
+  const branchItems = ['collapseBranch', 'expandBranch', 'tidyBranch', 'exportBranch'].map(action => `canvas-menu-${action}`);
+  const plain = renderBar({hasSelection: true});
+  plain.press('canvas-more');
+  expect(branchItems.map(plain.isListed)).toEqual([false, false, false, false]);
+
+  const node = renderBar({hasSelection: true, nodeSelected: true, canCollapse: true, canTidy: true});
+  node.press('canvas-more');
+  expect(branchItems.map(node.isDisabled)).toEqual([false, true, false, false]);
+  node.press('canvas-menu-tidyBranch');
+  expect(node.onCommand).toHaveBeenCalledWith('tidyBranch');
+  node.press('canvas-more');
+  node.press('canvas-menu-exportBranch');
+  expect(node.onExportBranch).toHaveBeenCalled();
 });

@@ -46,7 +46,13 @@ export type CanvasCommand =
   | 'linkSelected'
   | 'unlinkSelected'
   // Fills an empty canvas with the speed test map (PerfTestCanvas.kt); a canvas with anything on it is left alone.
-  | 'loadPerfTest';
+  | 'loadPerfTest'
+  // Mind maps (Wil's fork), on the node selected: fold its branch away or bring it back, space its children out.
+  | 'collapseBranch'
+  | 'expandBranch'
+  | 'tidyBranch'
+  // The pencil's weight, 'fine' or 'bold', as its argument.
+  | 'setPenWeight';
 
 type NativeProps = ViewProps & {
   toolMode: ToolMode;

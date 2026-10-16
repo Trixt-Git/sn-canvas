@@ -59,6 +59,9 @@ internal data class FirmwarePen(
         /** The canvas's pencil: the firmware's needle, black, at the size its strokes are drawn to match. */
         val CANVAS = FirmwarePen(NEEDLE, CANVAS_SIZE, BLACK)
 
+        /** The canvas's pencil at [size], in the firmware's own unit: what each [PenWeight] inks with. */
+        fun canvasPen(size: Int): FirmwarePen = FirmwarePen(NEEDLE, size, BLACK)
+
         /**
          * The firmware pen for the note's pen as the SDK's getPenInfo reports it,
          * or null for a nib the firmware has no code for. An unknown colour is

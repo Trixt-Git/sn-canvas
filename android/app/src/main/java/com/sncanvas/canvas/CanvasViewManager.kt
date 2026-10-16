@@ -119,6 +119,7 @@ class CanvasViewManager(
         when (command) {
             "setStyle" -> if (strings.size >= 2) root.controller.setStyle(strings[0], strings[1])
             "setText" -> if (strings.isNotEmpty()) root.controller.finishEdit(strings[0])
+            "setPenWeight" -> if (strings.isNotEmpty()) root.setPenWeight(PenWeight.byId(strings[0]))
             // A link's target can hold anything a path holds, so it crosses as a string, with its page beside it.
             "linkSelected" ->
                 // The controller refuses a kind it cannot follow; a blank target ElementLink itself does.
@@ -179,11 +180,15 @@ class CanvasViewManager(
                 "group" to { view -> view.groupSelected() },
                 "ungroup" to { view -> view.ungroupSelected() },
                 "loadPerfTest" to { view -> view.loadPerfTest() },
+                // Mind maps (PLAN.md steps 6 and 8): on the node selected.
+                "collapseBranch" to { view -> view.controller.collapseSelected() },
+                "expandBranch" to { view -> view.controller.expandSelected() },
+                "tidyBranch" to { view -> view.controller.tidySelected() },
             )
 
         // Command names and the numeric ids the Int overload receives (delete/undo/redo keep 1-3).
         private val COMMAND_IDS =
-            (SIMPLE_COMMANDS.keys + listOf("setStyle", "setText", "linkSelected"))
+            (SIMPLE_COMMANDS.keys + listOf("setStyle", "setText", "linkSelected", "setPenWeight"))
                 .withIndex()
                 .associate { (index, name) -> name to index + 1 }
     }

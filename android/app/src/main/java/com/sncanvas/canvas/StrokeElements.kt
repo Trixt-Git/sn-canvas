@@ -20,11 +20,15 @@ object StrokeElements {
      */
     const val PEN_WIDTH_PX = 9.0
 
-    /** A stroke from world-space [samples] (x, y, pressure) drawn at [zoom], thinned and lightly smoothed; null with no samples. */
+    /**
+     * A stroke from world-space [samples] (x, y, pressure) drawn at [zoom], [widthPx] wide on screen as it was
+     * drawn (the pencil's weight), thinned and lightly smoothed; null with no samples.
+     */
     fun fromSamples(
         id: String,
         samples: List<StrokePoint>,
         zoom: Double = 1.0,
+        widthPx: Double = PEN_WIDTH_PX,
     ): Element? {
         if (samples.isEmpty()) return null
         val points = smooth(thin(samples))
@@ -44,7 +48,7 @@ object StrokeElements {
                         it.pressure,
                     )
                 },
-            strokeWidth = PEN_WIDTH_PX / zoom,
+            strokeWidth = widthPx / zoom,
         )
     }
 

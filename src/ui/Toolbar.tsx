@@ -7,6 +7,7 @@
 
 import React, {useState} from 'react';
 import {Image, Pressable, StyleSheet, Text, View, type ImageSourcePropType} from 'react-native';
+import type {PenWeightId} from '../domain/styles';
 import type {ToolMode} from './nativeCanvasView';
 
 const TOOLS: ReadonlyArray<{id: ToolMode; label: string; icon: ImageSourcePropType}> = [
@@ -36,13 +37,23 @@ const PADDING_V = 8;
 const BORDER = 1;
 const SEPARATOR_MARGIN = 6;
 const PILL_HEIGHT = BUTTON + 2 * (PADDING_V + BORDER);
-// Every tool, then the image and help buttons, the separator between those two, and the pill's padding and border.
-const HALF_WIDTH = ((TOOLS.length + 2) * SLOT + 1 + 2 * SEPARATOR_MARGIN + 2 * (PADDING_H + BORDER)) / 2;
+// Wil's fork: the pencil's Fine/Bold toggle sits in a slot of its own, straight after the pencil.
+const PENCIL_INDEX = TOOLS.findIndex(t => t.id === 'draw');
+/** The slot [tool] is drawn in: its place among the tools, one further along past the pencil's weight toggle. */
+const slotOf = (tool: ToolMode) => {
+  const index = TOOLS.findIndex(t => t.id === tool);
+  return index > PENCIL_INDEX ? index + 1 : index;
+};
+
+// Every tool and the weight toggle, then the image and help buttons, the separator between those two, and the
+// pill's padding and border.
+const HALF_WIDTH = ((TOOLS.length + 3) * SLOT + 1 + 2 * SEPARATOR_MARGIN + 2 * (PADDING_H + BORDER)) / 2;
 
 /** Where the pill's buttons sit, in dp: its top above the screen's bottom, and button centres from the middle. */
 export const TOOLBAR_GEOMETRY = {
   top: BOTTOM + BUTTON + 2 * (PADDING_V + BORDER),
-  toolCenterX: (tool: ToolMode) => -HALF_WIDTH + BORDER + PADDING_H + SLOT * (TOOLS.findIndex(t => t.id === tool) + 0.5),
+  toolCenterX: (tool: ToolMode) => -HALF_WIDTH + BORDER + PADDING_H + SLOT * (slotOf(tool) + 0.5),
+  penWeightCenterX: -HALF_WIDTH + BORDER + PADDING_H + SLOT * (PENCIL_INDEX + 1.5),
   helpCenterX: HALF_WIDTH - BORDER - PADDING_H - SLOT / 2,
 };
 
@@ -57,6 +68,10 @@ type Props = {
   onClearCanvas: () => void;
   /** Whether the canvas holds anything, so Clear canvas is offered. */
   canClearCanvas: boolean;
+  /** How wide the pencil writes (Wil's fork). */
+  penWeight: PenWeightId;
+  /** The pencil should write at [weight] from now on. */
+  onPenWeightChange: (weight: PenWeightId) => void;
 };
 
 export default function Toolbar({
@@ -67,6 +82,8 @@ export default function Toolbar({
   onToggleHints,
   onClearCanvas,
   canClearCanvas,
+  penWeight,
+  onPenWeightChange,
 }: Props): React.JSX.Element {
   // Erasing a stroke and erasing the lot belong together, so the eraser, once it
   // is the tool, opens its own options on a second tap (its caret says so).
@@ -102,15 +119,31 @@ export default function Toolbar({
         {TOOLS.map(tool => {
           const active = tool.id === toolMode;
           return (
-            <Pressable
-              key={tool.id}
-              testID={`canvas-tool-${tool.id}`}
-              accessibilityLabel={tool.label}
-              style={[styles.button, active && styles.buttonActive]}
-              onPress={() => pickTool(tool.id)}>
-              <Image source={tool.icon} style={[styles.icon, active && styles.iconActive]} />
-              {tool.id === 'eraser' && <View style={[styles.caret, active && styles.caretActive]} />}
-            </Pressable>
+            <React.Fragment key={tool.id}>
+              <Pressable
+                testID={`canvas-tool-${tool.id}`}
+                accessibilityLabel={tool.label}
+                style={[styles.button, active && styles.buttonActive]}
+                onPress={() => pickTool(tool.id)}>
+                <Image source={tool.icon} style={[styles.icon, active && styles.iconActive]} />
+                {tool.id === 'eraser' && <View style={[styles.caret, active && styles.caretActive]} />}
+              </Pressable>
+              {tool.id === 'draw' && (
+                // One tap switches between the two weights, and takes the pencil up if it was not in hand, since
+                // choosing how wide to write means writing next. The line shows the weight it writes at now.
+                <Pressable
+                  testID="canvas-pen-weight"
+                  accessibilityLabel={penWeight === 'bold' ? 'Pen weight: bold' : 'Pen weight: fine'}
+                  style={styles.button}
+                  onPress={() => {
+                    onPenWeightChange(penWeight === 'bold' ? 'fine' : 'bold');
+                    pickTool('draw');
+                  }}>
+                  <View style={[styles.weightLine, penWeight === 'bold' ? styles.weightBold : styles.weightFine]} />
+                  <Text style={styles.weightLabel}>{penWeight === 'bold' ? 'Bold' : 'Fine'}</Text>
+                </Pressable>
+              )}
+            </React.Fragment>
           );
         })}
         <Pressable
@@ -225,6 +258,23 @@ const styles = StyleSheet.create({
     width: 22,
     height: 22,
     tintColor: '#000000',
+  },
+  // The pen weight toggle: a short line as thick as the pencil writes, its name under it.
+  weightLine: {
+    width: 22,
+    borderRadius: 3,
+    backgroundColor: '#000000',
+  },
+  weightFine: {
+    height: 2,
+  },
+  weightBold: {
+    height: 6,
+  },
+  weightLabel: {
+    marginTop: 3,
+    fontSize: 10,
+    color: '#000000',
   },
   iconActive: {
     tintColor: '#ffffff',

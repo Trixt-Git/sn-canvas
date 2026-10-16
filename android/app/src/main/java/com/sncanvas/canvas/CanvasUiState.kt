@@ -31,6 +31,15 @@ data class CanvasUiState(
      * zoom without changing the number it reads sends nothing (#12).
      */
     val zoomPercent: Int = 100,
+    /** The pencil's weight, a [PenWeight] id, for the toolbar's Fine/Bold toggle. */
+    val penWeight: String = PenWeight.FINE.id,
+    /** Whether the one selected element is a mind-map node (a plain rectangle or ellipse). */
+    val nodeSelected: Boolean = false,
+    /** Whether the selected node has a branch that could be folded away, or one folded away to bring back. */
+    val canCollapse: Boolean = false,
+    val canExpand: Boolean = false,
+    /** Whether the selected node has children to space out. */
+    val canTidy: Boolean = false,
 ) {
     fun toPayload(): Map<String, Any> =
         mapOf(
@@ -44,6 +53,11 @@ data class CanvasUiState(
             "canRemoveTableRow" to canRemoveTableRow,
             "canRemoveTableColumn" to canRemoveTableColumn,
             "zoomPercent" to zoomPercent,
+            "penWeight" to penWeight,
+            "nodeSelected" to nodeSelected,
+            "canCollapse" to canCollapse,
+            "canExpand" to canExpand,
+            "canTidy" to canTidy,
             "selectedType" to selectedType.orEmpty(),
             "style" to
                 mapOf(

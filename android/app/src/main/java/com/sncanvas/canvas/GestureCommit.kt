@@ -53,6 +53,7 @@ internal class GestureCommit(
             CanvasGesture.Pan -> if (isTap) controller.select(CanvasCore.hitTest(end.x, end.y, controller.state.elements)?.id)
             CanvasGesture.Marquee -> selectInMarquee(start, end)
             is CanvasGesture.FollowLink -> followLink(finished.elementId, isTap)
+            is CanvasGesture.ToggleBranch -> if (isTap) controller.toggleCollapsed(finished.elementId)
             CanvasGesture.DrawShape -> commitDrawnShape(start, end, totalDist)
             CanvasGesture.PlaceText -> if (isTap) controller.placeText(host.toolMode(), start)
             is CanvasGesture.Freehand -> commitStroke(finished)
@@ -65,10 +66,13 @@ internal class GestureCommit(
         }
     }
 
-    /** Commits the pencil's stroke, keeping its firmware ink: that is what the user just drew. Too short for a stroke, it goes. */
+    /**
+     * Commits the pencil's stroke at the pencil's weight, keeping its firmware ink: that is what the user just drew.
+     * Written inside a node, it is attached to that node (mind maps). Too short for a stroke, it goes.
+     */
     fun commitStroke(freehand: CanvasGesture.Freehand) {
-        val stroke = StrokeElements.fromSamples(host.newElementId(), freehand.samples, controller.state.zoom)
-        if (stroke == null) ink.wipe() else ink.keepInk { controller.insert(stroke) }
+        val stroke = StrokeElements.fromSamples(host.newElementId(), freehand.samples, controller.state.zoom, controller.penWeight.widthPx)
+        if (stroke == null) ink.wipe() else ink.keepInk { controller.insert(MindMap.attachTo(stroke, controller.state.elements)) }
     }
 
     /** A tap that stayed on the glyph follows its link; a drag off it was the user changing their mind. */
@@ -135,9 +139,13 @@ internal class GestureCommit(
         end: Point,
         totalDist: Double,
     ) {
-        if (totalDist <= MIN_SHAPE_DRAG_PX) return
-        val id = host.newElementId()
         val tool = host.toolMode()
+        if (totalDist <= MIN_SHAPE_DRAG_PX) {
+            // Mind maps: a tap with the rectangle or ellipse places a node there, or picks the one it landed on.
+            if (tool == CanvasTools.RECTANGLE || tool == CanvasTools.ELLIPSE) controller.tapNode(tool, start)
+            return
+        }
+        val id = host.newElementId()
         controller.insert(
             when {
                 tool == CanvasTools.TABLE -> TableElements.create(id, start, end)

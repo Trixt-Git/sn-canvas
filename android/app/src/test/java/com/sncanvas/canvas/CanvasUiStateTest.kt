@@ -22,6 +22,12 @@ class CanvasUiStateTest {
                 "canRemoveTableRow" to true,
                 "canRemoveTableColumn" to true,
                 "zoomPercent" to 250,
+                // Wil's fork: the pencil's weight and what the selected mind-map node allows.
+                "penWeight" to "fine",
+                "nodeSelected" to false,
+                "canCollapse" to false,
+                "canExpand" to false,
+                "canTidy" to false,
                 "selectedType" to "table",
                 "style" to styleIds,
             ),

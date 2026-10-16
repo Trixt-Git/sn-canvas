@@ -104,7 +104,7 @@ internal class ElementPainter(
         context: Context,
     ) {
         val bounds = screenBounds(element, context.transform)
-        val outline = shapePath(element, bounds, context.transform)
+        val outline = outlinePath(element, bounds, context.transform)
         withRotation(canvas, element, bounds) {
             drawFill(canvas, outline, bounds, element.style, context.palette)
             drawOutline(canvas, outline, element.style, context)
@@ -127,9 +127,41 @@ internal class ElementPainter(
                 imagePaint.alpha = element.style.alpha
                 canvas.drawBitmap(bitmap, null, bounds, imagePaint)
             }
-            drawOutline(canvas, shapePath(element, bounds, context.transform), element.style, context)
+            drawOutline(canvas, outlinePath(element, bounds, context.transform), element.style, context)
         }
     }
+
+    /**
+     * [element]'s outline in its screen [bounds] ([shapePath]), with the hand-drawn wobble worked out once per
+     * shape and kept ([outlines]) rather than worked out again on every frame (PLAN.md step 1).
+     */
+    private fun outlinePath(
+        element: Element,
+        bounds: RectF,
+        transform: ViewTransform,
+    ): Path {
+        if (element.style.dash != DashStyle.DRAW) return shapePath(element, bounds, transform)
+        val key = OutlineKey(element.id, element.type, element.x, element.y, element.width, element.height, element.style.size)
+        val wobble = outlines.getOrPut(key) { wobbly(ShapeOutline.of(element), closed = true, element) }
+        return screenPath(wobble, transform, closed = true)
+    }
+
+    /** What a shape's hand-drawn outline depends on: its id seeds the wobble, its box and size shape it. */
+    private data class OutlineKey(
+        val id: String,
+        val type: String,
+        val x: Double,
+        val y: Double,
+        val width: Double,
+        val height: Double,
+        val size: SizeStyle,
+    )
+
+    // The most recently drawn shapes' wobbly outlines, in world units; the oldest go first past the limit.
+    private val outlines =
+        object : LinkedHashMap<OutlineKey, List<Point>>(INITIAL_OUTLINES, LOAD_FACTOR, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<OutlineKey, List<Point>>?): Boolean = size > MAX_OUTLINES
+        }
 
     /** A light box with a cross through it: where an image's file can't be read. */
     private fun drawMissingImage(
@@ -287,5 +319,8 @@ internal class ElementPainter(
         const val HATCH_SPACING_PX = 12f
         const val HATCH_WIDTH_PX = 2f
         const val MISSING_IMAGE_FILL = 0xFFE6E6E6.toInt()
+        const val INITIAL_OUTLINES = 64
+        const val MAX_OUTLINES = 2048
+        const val LOAD_FACTOR = 0.75f
     }
 }

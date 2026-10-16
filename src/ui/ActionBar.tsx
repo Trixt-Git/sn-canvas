@@ -9,7 +9,15 @@ import type {CanvasUiState} from '../domain/styles';
 import type {CanvasCommand} from './nativeCanvasView';
 
 /** Actions the screen handles rather than the canvas: a session call, or a question asked first. */
-const SCREEN_ACTIONS = ['newCanvas', 'linkToNote', 'linkToCanvas', 'noteCanvases', 'clearCanvas', 'showTour'] as const;
+const SCREEN_ACTIONS = [
+  'newCanvas',
+  'linkToNote',
+  'linkToCanvas',
+  'noteCanvases',
+  'clearCanvas',
+  'showTour',
+  'exportBranch',
+] as const;
 type ScreenAction = (typeof SCREEN_ACTIONS)[number];
 
 const isScreenAction = (action: CanvasCommand | ScreenAction): action is ScreenAction =>
@@ -110,6 +118,9 @@ type MenuItem = {
   needsRemovableRow?: boolean;
   /** Greyed out until a cell has been tapped and the table has a column it can spare (#53). */
   needsRemovableColumn?: boolean;
+  /** Listed only while a mind-map node is selected (Wil's fork), and greyed out unless [nodeEnabled] says it applies. */
+  nodeOnly?: boolean;
+  nodeEnabled?: (ui: CanvasUiState) => boolean;
 };
 
 const MENU: readonly MenuItem[] = [
@@ -119,6 +130,12 @@ const MENU: readonly MenuItem[] = [
   {action: 'tableAddColumn', label: 'Add column', tableOnly: true},
   {action: 'tableRemoveRow', label: 'Remove this row', tableOnly: true, needsRemovableRow: true},
   {action: 'tableRemoveColumn', label: 'Remove this column', tableOnly: true, needsRemovableColumn: true},
+  // Mind maps (Wil's fork): what a selected node's branch can do. Collapse and expand are also the badge
+  // beside the node; these are where to find them by name.
+  {action: 'collapseBranch', label: 'Collapse branch', nodeOnly: true, nodeEnabled: ui => ui.canCollapse},
+  {action: 'expandBranch', label: 'Expand branch', nodeOnly: true, nodeEnabled: ui => ui.canExpand},
+  {action: 'tidyBranch', label: 'Tidy branch', nodeOnly: true, nodeEnabled: ui => ui.canTidy},
+  {action: 'exportBranch', label: 'Export branch to PDF', nodeOnly: true},
   // Also on the zoom control, deliberately. They were here first and are where people who found them
   // will look; the control exists because most people did not find them at all (#12).
   {action: 'zoomToFit', label: 'Zoom to fit'},
@@ -173,6 +190,8 @@ type Props = {
   onShowTour: () => void;
   /** The ⋮ menu is opening: the screen puts the onboarding hints away, so neither is drawn over the other. */
   onMenuOpen: () => void;
+  /** Exports the selected node's branch to a PDF (Wil's fork). */
+  onExportBranch: () => void;
 };
 
 export default function ActionBar({
@@ -185,6 +204,7 @@ export default function ActionBar({
   onNoteCanvases,
   onShowTour,
   onMenuOpen,
+  onExportBranch,
 }: Props): React.JSX.Element {
   const [isMenuOpen, setMenuOpen] = useState(false);
   // What the screen does for the items that are not canvas commands; Clear canvas is one, but asks first.
@@ -197,6 +217,7 @@ export default function ActionBar({
     noteCanvases: onNoteCanvases,
     clearCanvas: onClearCanvas,
     showTour: onShowTour,
+    exportBranch: onExportBranch,
   };
 
   /** Runs [action] wherever it was tapped: the screen's own, or the canvas's. */
@@ -213,12 +234,13 @@ export default function ActionBar({
     <View style={styles.wrapper} pointerEvents="box-none">
       {isMenuOpen && (
         <View style={styles.menu}>
-          {MENU.filter(item => !item.tableOnly || ui.selectedType === 'table').map(item => {
+          {MENU.filter(item => (!item.tableOnly || ui.selectedType === 'table') && (!item.nodeOnly || ui.nodeSelected)).map(item => {
             const enabled =
               (!item.needsSelection || ui.hasSelection) &&
               (!item.needsContent || ui.hasContent) &&
               (!item.needsRemovableRow || ui.canRemoveTableRow) &&
-              (!item.needsRemovableColumn || ui.canRemoveTableColumn);
+              (!item.needsRemovableColumn || ui.canRemoveTableColumn) &&
+              (!item.nodeEnabled || item.nodeEnabled(ui));
             return (
               <Pressable
                 key={item.action}

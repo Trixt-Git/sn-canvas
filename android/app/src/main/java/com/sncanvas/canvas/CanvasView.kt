@@ -3,6 +3,7 @@ package com.sncanvas.canvas
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.Color
 import android.graphics.PointF
 import android.util.Log
 import android.view.MotionEvent
@@ -129,6 +130,8 @@ class CanvasView(
                     erase: CanvasGesture.Erase,
                     world: Point,
                 ) = this@CanvasView.eraseAt(erase, world)
+
+                override fun selectedIds(): Set<String> = controller.selectedIds
             },
         )
 
@@ -143,8 +146,31 @@ class CanvasView(
     private val lastTouch = PointF()
     private val dragCurrent = PointF()
 
-    // The frame as it looked when a pan began, blitted while it drags instead of repainting (PanPreview).
-    private val panPreview = PanPreview(renderer)
+    // The canvas drawn once and kept: frames copy it and draw only what a gesture is changing (SceneCache).
+    private val sceneCache = SceneCache(renderer)
+
+    // Two fingers held still in a right-hand corner turn the pen into the eraser (GestureEraser).
+    private val gestureEraser =
+        GestureEraser(
+            mmPerPx = {
+                GestureEraser.MM_PER_INCH /
+                    resources.displayMetrics.xdpi
+                        .toDouble()
+                        .coerceAtLeast(1.0)
+            },
+            viewSize = { width to height },
+        )
+
+    // The pen landed mid-pinch, and the pinch is being ended for it: no clean refresh for that.
+    private var endingPinchForPen = false
+
+    // A full black frame shows for a moment after the view has been moved, to clear the e-ink ghosting.
+    private var flashing = false
+    private val endFlash =
+        Runnable {
+            flashing = false
+            invalidate()
+        }
 
     // When the minimap shows, where it sits, and what it draws (Minimap).
     private val minimap = Minimap(this) { controller.state }
@@ -156,7 +182,15 @@ class CanvasView(
         ScaleGestureDetector(
             context,
             object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                // The pinch slides and scales the kept drawing (SceneCache.drawMoved), so it starts from a fresh one.
+                override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
+                    keepSceneForMoving()
+                    return true
+                }
+
                 override fun onScale(detector: ScaleGestureDetector): Boolean {
+                    // Two fingers held still for the gesture eraser are not a pinch; once they move, they are.
+                    if (gestureEraser.isActive) return true
                     val focal = toWorld(detector.focusX, detector.focusY)
                     controller.setViewport(
                         CanvasCore.zoomTo(controller.state, detector.scaleFactor.toDouble(), focal.x, focal.y).transform,
@@ -165,8 +199,14 @@ class CanvasView(
                     return true
                 }
 
-                /** The pinch is over: tell the zoom control where it ended up (#12). */
-                override fun onScaleEnd(detector: ScaleGestureDetector) = controller.viewportSettled()
+                /**
+                 * The pinch is over: tell the zoom control where it ended up (#12), and draw the canvas crisp again,
+                 * with a clean refresh unless it was the pen landing that ended it.
+                 */
+                override fun onScaleEnd(detector: ScaleGestureDetector) {
+                    controller.viewportSettled()
+                    if (endingPinchForPen) invalidate() else flashRefresh()
+                }
             },
         )
 
@@ -198,12 +238,15 @@ class CanvasView(
 
     /** The pencil's firmware ink while the canvas shows; the pen goes back to the note the moment it doesn't. */
     private fun syncPen() {
-        if (isShown && windowVisibility == VISIBLE) liveInk.update(isPencil) else liveInk.release()
+        if (isShown && windowVisibility == VISIBLE) liveInk.update(firmwareInks) else liveInk.release()
     }
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         perfLog.flush()
+        removeCallbacks(endFlash)
+        flashing = false
+        sceneCache.forget()
         minimap.forget()
         liveInk.release()
         registry.detach(this)
@@ -213,7 +256,16 @@ class CanvasView(
     fun setToolMode(mode: String) {
         if (mode == toolMode) return
         toolMode = mode
-        liveInk.update(isPencil)
+        liveInk.update(firmwareInks)
+    }
+
+    // The firmware inks the pen while the pencil is in hand, except while the gesture eraser has the pen erasing.
+    private val firmwareInks: Boolean get() = isPencil && !gestureEraser.isActive
+
+    /** The pencil writes at [weight] from now on: the firmware's live ink and the strokes it leaves both (PLAN.md step 3). */
+    fun setPenWeight(weight: PenWeight) {
+        controller.setPenWeight(weight)
+        liveInk.penWeight = weight
     }
 
     /** The pen the note writes with, set back as the canvas gives the pen back; null when unknown. */
@@ -243,14 +295,30 @@ class CanvasView(
         heldPath = path
     }
 
-    /** Replaces the canvas content, restarts the undo history from it, and frames it (FR13). */
+    /**
+     * Replaces the canvas content, restarts the undo history from it, and frames it (FR13). An empty canvas starts as a
+     * mind map (PLAN.md step 10): one centre node, selected, so the first node tapped beside it joins it.
+     */
     private fun setElements(elements: List<Element>) {
-        controller.load(elements)
+        val starter =
+            if (elements.isEmpty()) {
+                MindMap.newNode(
+                    STARTER_PREFIX + newElementId(),
+                    CanvasTools.ELLIPSE,
+                    Point(0.0, 0.0),
+                    STARTER_STYLE,
+                )
+            } else {
+                null
+            }
+        controller.load(listOfNotNull(starter).ifEmpty { elements })
+        starter?.let { controller.select(it.id) }
         perfLog.mark("load", elements.size)
         // Said again even when it reads the same as the last canvas, so the screen always hears what a load left it with.
         controller.republish()
+        // Still empty as far as the hints are concerned: a new canvas is where they help.
         events.onLoaded(this, elements.isNotEmpty())
-        fitToContent()
+        if (starter != null) frameAtActualSize(MindMap.center(starter)) else fitToContent()
     }
 
     /** A snapshot of the current canvas state, e.g. for `saveCanvas`. */
@@ -271,7 +339,12 @@ class CanvasView(
      * with anything on it is left alone, so a stray long press can never bury real work under the test map.
      */
     fun loadPerfTest() {
-        if (controller.state.elements.isNotEmpty()) {
+        val untouchedStarter =
+            controller.state.elements
+                .singleOrNull()
+                ?.id
+                ?.startsWith(STARTER_PREFIX) == true
+        if (controller.state.elements.isNotEmpty() && !untouchedStarter) {
             Log.i(LOG_TAG, "speed test map not loaded: the canvas is not empty")
             return
         }
@@ -312,10 +385,27 @@ class CanvasView(
     ) {
         super.onSizeChanged(w, h, oldw, oldh)
         if (isFitPending) fitToContent()
+        pendingCentre?.let(::frameAtActualSize)
+    }
+
+    // A new canvas's centre node waiting for the view's size, to be shown at 100% in the middle of it.
+    private var pendingCentre: Point? = null
+
+    /** Shows [world] in the middle of the view at 100%: a fitted single node would fill the screen. */
+    private fun frameAtActualSize(world: Point) {
+        isFitPending = false
+        if (width == 0 || height == 0) {
+            pendingCentre = world
+            return
+        }
+        pendingCentre = null
+        controller.setViewport(ViewTransform(world.x - width / 2.0, world.y - height / 2.0, 1.0))
+        controller.viewportSettled()
     }
 
     /** Frames all content in the view; before the first layout there is no size yet, so it waits for [onSizeChanged]. */
     private fun fitToContent() {
+        pendingCentre = null
         isFitPending = width == 0 || height == 0
         if (isFitPending) return
         controller.setViewport(ViewTransforms.fitToView(controller.state.elements, width.toDouble(), height.toDouble(), FIT_PADDING_PX))
@@ -356,6 +446,7 @@ class CanvasView(
     override fun onTouchEvent(event: MotionEvent): Boolean {
         // One coarse event per touch, never per sample (NFR5): it only tells the UI the canvas was touched.
         if (event.actionMasked == MotionEvent.ACTION_DOWN) events.onTouched(this)
+        trackGestureEraser(event)
         // Pinch-zoom is a two-finger gesture; a palm beside the drawing pen must not zoom.
         if (!arbiter.isPenActive) scaleGestureDetector.onTouchEvent(event)
         val inputs =
@@ -373,6 +464,9 @@ class CanvasView(
                 MotionEvent.ACTION_CANCEL -> listOfNotNull(arbiter.cancel())
                 else -> emptyList()
             }
+        // The pen took over mid-pinch. The detector is not fed while the pen is down, so left alone it would stay "in
+        // progress" for the whole stroke, and every pen move would be ignored (handleMove returns while it is).
+        if (arbiter.isPenActive && scaleGestureDetector.isInProgress) endPinchForPen(event)
         inputs.forEach(::handleInput)
         // The touch stream is over, so whatever it moved has settled. onScaleEnd covers a pinch that
         // finishes as one, but the detector stops being fed the moment the pen comes down, so a pinch
@@ -382,6 +476,76 @@ class CanvasView(
             controller.viewportSettled()
         }
         return true
+    }
+
+    /** Ends the pinch in progress by telling its detector the touch stream was cancelled, as [event] stands. */
+    private fun endPinchForPen(event: MotionEvent) {
+        val cancel = MotionEvent.obtain(event)
+        cancel.action = MotionEvent.ACTION_CANCEL
+        endingPinchForPen = true
+        try {
+            scaleGestureDetector.onTouchEvent(cancel)
+        } finally {
+            endingPinchForPen = false
+            cancel.recycle()
+        }
+    }
+
+    /** Feeds the fingers in [event] to the gesture eraser, and follows it when it turns on or off. */
+    private fun trackGestureEraser(event: MotionEvent) {
+        val wasActive = gestureEraser.isActive
+        val index = event.actionIndex
+        val isFinger = { i: Int -> event.getToolType(i) == MotionEvent.TOOL_TYPE_FINGER }
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN ->
+                if (isFinger(index)) {
+                    gestureEraser.fingerDown(
+                        event.getPointerId(index),
+                        event.getX(index),
+                        event.getY(index),
+                        event.eventTime,
+                        arbiter.isPenActive,
+                    )
+                }
+            MotionEvent.ACTION_MOVE ->
+                for (i in 0 until event.pointerCount) {
+                    if (isFinger(i)) gestureEraser.fingerMove(event.getPointerId(i), event.getX(i), event.getY(i))
+                }
+            MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_UP -> if (isFinger(index)) gestureEraser.fingerUp(event.getPointerId(index))
+            MotionEvent.ACTION_CANCEL -> gestureEraser.cancelled()
+        }
+        if (gestureEraser.isActive != wasActive) gestureEraserChanged()
+    }
+
+    /** The gesture eraser turned on or off: the firmware stops or starts inking the pen, and the label shows or goes. */
+    private fun gestureEraserChanged() {
+        Log.i(LOG_TAG, "gesture eraser ${if (gestureEraser.isActive) "on" else "off"}")
+        liveInk.update(firmwareInks)
+        invalidate()
+    }
+
+    /** A pen stroke ended: the gesture eraser may have been waiting for exactly that. */
+    private fun penLifted(finished: CanvasGesture?) {
+        if (finished !is CanvasGesture.Erase) return
+        val wasActive = gestureEraser.isActive
+        gestureEraser.penLifted()
+        if (gestureEraser.isActive != wasActive) gestureEraserChanged()
+    }
+
+    /** Draws the canvas as it is now into the kept drawing, for the view to slide and scale while it moves. */
+    private fun keepSceneForMoving() {
+        sceneCache.ensure(controller.state.elements, controller.state.transform, width, height, hidden = frame.hiddenText())
+    }
+
+    /**
+     * The view has been moved (a pan, a pinch, the minimap): one black frame, then the canvas again, which is how an
+     * e-ink panel clears the ghosting a moving picture leaves behind (PLAN.md step 2). A touch cuts it short.
+     */
+    private fun flashRefresh() {
+        removeCallbacks(endFlash)
+        flashing = true
+        invalidate()
+        postDelayed(endFlash, FLASH_MS)
     }
 
     /** The pen's batched positions between moves, for the pencil's smooth line. */
@@ -400,13 +564,19 @@ class CanvasView(
         }
     }
 
-    private fun handleStart(contact: Contact) {
+    private fun handleStart(landed: Contact) {
+        // Two fingers held in a corner turn the pen into the eraser, whatever tool is in hand (GestureEraser).
+        val contact = if (landed.isPen && gestureEraser.isActive) landed.copy(isEraser = true) else landed
+        if (flashing) {
+            removeCallbacks(endFlash)
+            endFlash.run()
+        }
         if (contact.isPen) liveInk.penDown()
         downTouch.set(contact.x, contact.y)
         lastTouch.set(contact.x, contact.y)
         dragCurrent.set(contact.x, contact.y)
         gesture = starts.at(contact, toWorld(contact.x, contact.y))
-        if (gesture == CanvasGesture.Pan) panPreview.take(controller.state, width, height)
+        if (movesView(gesture)) keepSceneForMoving()
         Log.d(
             LOG_TAG,
             "touch start pen=${contact.isPen} eraser=${contact.isEraser} tool=$toolMode gesture=${gesture?.javaClass?.simpleName}",
@@ -430,6 +600,7 @@ class CanvasView(
         val redraw = needsRedraw()
         gesture = null
         if (abandoned is CanvasGesture.Freehand) commits.commitStroke(abandoned) else liveInk.wipe()
+        penLifted(abandoned)
         if (minimap.isShowing()) minimap.hideSoon()
         if (redraw) invalidate()
     }
@@ -488,9 +659,19 @@ class CanvasView(
         // redraws once the pen rests, which in a light colour's pale gray looked like the writing had vanished.
         if (finished != null && finished !is CanvasGesture.Freehand) liveInk.wipe()
         gesture = null
+        penLifted(finished)
         if (minimap.isShowing()) minimap.hideSoon()
         if (redraw) invalidate()
+        // A view that was actually moved gets its clean refresh; a tap that only selected does not.
+        if ((finished == CanvasGesture.Pan && totalDist > GestureCommit.TAP_SLOP_PX) ||
+            finished is CanvasGesture.MinimapDrag
+        ) {
+            flashRefresh()
+        }
     }
+
+    /** Whether [active] moves the view itself, rather than anything on the canvas. */
+    private fun movesView(active: CanvasGesture?): Boolean = active == CanvasGesture.Pan || active is CanvasGesture.MinimapDrag
 
     /**
      * A gesture redraws the canvas as it moves and when it ends, except the pencil's while the firmware inks it: that
@@ -510,33 +691,71 @@ class CanvasView(
 
     /**
      * Draws one frame and says which kind it was, for [perfLog]: "ink" (the pencil's live stroke, drawn by the canvas
-     * when the firmware cannot ink it), "pan" (the snapshot taken as a pan began, slid under the finger) or "full"
-     * (everything, element by element).
+     * when the firmware cannot ink it), "flash" (the black frame of a clean refresh), "pan" (the kept drawing slid and
+     * scaled while the view moves), "full" (the kept drawing drawn again, element by element) or "cached" (the kept
+     * drawing copied, with only what a gesture is changing drawn on top).
      */
     private fun drawFrame(canvas: Canvas): String {
+        if (flashing) {
+            canvas.drawColor(Color.BLACK)
+            return FRAME_FLASH
+        }
         val transform = controller.state.transform
         val freehand = gesture as? CanvasGesture.Freehand
         if (freehand != null && liveInk.drawLive(canvas, frame.liveStroke(freehand), transform)) return FRAME_INK
-        if (gesture == CanvasGesture.Pan && panPreview.drawUnder(canvas, transform)) {
+        if ((movesView(gesture) || scaleGestureDetector.isInProgress) && sceneCache.drawMoved(canvas, transform, width, height)) {
             minimap.draw(canvas, draggingMinimap())
             return FRAME_PAN
         }
-        renderer.drawBackground(canvas, width.toFloat(), height.toFloat())
+        val held = controller.state.elements
         val elements = frame.elements(gesture, toWorld(dragCurrent.x, dragCurrent.y))
-        renderer.drawElements(canvas, elements, transform, StylePalette.EINK, frame.hiddenText())
+        val hidden = frame.hiddenText()
+        // Everything the gesture is not changing comes from the kept drawing; only what it is changing is drawn here.
+        val changing = SceneCull.changedIds(held, elements)
+        val redrawn = sceneCache.ensure(held, transform, width, height, changing, hidden)
+        val visible = transform.visibleRect(width.toDouble(), height.toDouble())
+        if (sceneCache.draw(canvas)) {
+            if (changing.isNotEmpty()) {
+                renderer.drawElements(
+                    canvas,
+                    elements,
+                    transform,
+                    StylePalette.EINK,
+                    hidden,
+                    only = changing,
+                    visible = visible,
+                )
+            }
+        } else {
+            renderer.drawBackground(canvas, width.toFloat(), height.toFloat())
+            renderer.drawElements(canvas, elements, transform, StylePalette.EINK, hidden, visible = visible)
+        }
         renderer.drawSelection(canvas, elements, controller.selectedIds, transform)
         controller.currentCell?.let { renderer.drawCurrentCell(canvas, elements, it, transform) }
         renderer.drawLinkGlyphs(canvas, elements, transform)
+        renderer.drawBranchBadges(canvas, elements, controller.selectedIds, transform)
         if (gesture == CanvasGesture.DrawShape) renderer.drawDragPreview(canvas, toolMode, downTouch, dragCurrent, transform.zoom)
         if (gesture == CanvasGesture.Marquee) renderer.drawMarquee(canvas, downTouch, dragCurrent)
         minimap.draw(canvas, draggingMinimap())
-        return FRAME_FULL
+        if (gestureEraser.isActive) renderer.drawModeLabel(canvas, ERASER_LABEL, width.toFloat())
+        return if (redrawn) FRAME_FULL else FRAME_CACHED
     }
 
     private companion object {
         const val FRAME_INK = "ink"
         const val FRAME_PAN = "pan"
         const val FRAME_FULL = "full"
+        const val FRAME_CACHED = "cached"
+        const val FRAME_FLASH = "flash"
+
+        // How long the black frame of a clean refresh stays up: long enough for the panel to show it whole.
+        const val FLASH_MS = 200L
+
+        const val ERASER_LABEL = "Eraser"
+
+        // A new canvas's centre node (PLAN.md step 10): its id says it is one, so the speed test may still replace it.
+        const val STARTER_PREFIX = "starter-"
+        val STARTER_STYLE = ShapeStyle.DEFAULT.copy(size = SizeStyle.L)
 
         // Generous, so fitted content clears the floating toolbar at the bottom.
         const val FIT_PADDING_PX = 96.0
